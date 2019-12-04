@@ -1,0 +1,142 @@
+\documentclass[11pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage{amssymb}
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{hyperref}
+\usepackage{setspace}
+\usepackage{cite}
+\usepackage[a4paper, margin=1in]{geometry}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{2ex}
+\setstretch{1.1}
+
+\begin{document}
+{\Large{\textbf{CS5242: Project Report (Authors: Chan Wei Xin, Yuki Sasa)}}}
+\section{Problem Definition}
+Our work seeks to apply Deep Learning methods to predict the probability of protein-ligand binding through the Keras API. We model our prediction task as a binary classification problem, ‘dock’ vs ‘no dock’ between a protein-ligand pair. Our neural network takes in as input the (x, y, z) coordinates and atom types of atoms in a protein-ligand pair. Atom types have been simplified to be either hydrophobic or polar based on their element. Our test data set consists of 824 proteins and 824 ligands. We have been tasked to suggest 10 ligands that will bind to each protein. For each protein, we feed all 824 possible protein-ligand pairs into our neural network to obtain the probabilities of each pair binding. We select ten protein-ligand pairs with the highest probabilities of binding as our suggestions.
+
+\section{Insights}
+To obtain some intuition of how to design a neural network and  how to preprocess our data to enable successful prediction of protein-ligand binding pairs, we viewed correct and incorrect protein-ligand pairs in PyMol \cite{delano2002pymol}. We observed that correct pairs dock perfectly in 3D space, while incorrect pairs are often spatially distant. We exploited this fact to preprocess our data based on the spatial structure of our proteins and ligands.
+
+We also wanted our neural network to be able to infer some of the biological knowledge that humans have discovered about protein-ligand binding. Namely, that the docking site on a protein has a complementary shape to the ligand, protein and ligand bind at a distance of a few angstroms, and that similar types of atoms tend to exist in both the protein binding site and ligand. This is because the interaction between protein and ligand is often a result of dispersion forces that occur between non-polar molecules, and permanent dipole-induced dipole interactions that occur between polar molecules. 
+
+\subsection{Protein and ligand sizes}
+Upon inspection of the PDB files provided, we discovered that the proteins and ligands were of different sizes. The protein sizes ranged from 38-14,644 atoms, while ligand sizes ranged from 1-24 atoms. Figure \ref{fig:hist_sizes} shows the distribution of protein and ligand sizes. In order to feed all the protein-ligand pairs into our neural network, we had to preprocess our data set so that all pairs would have an equal number of features.
+
+\begin{figure}[htb]
+     \centering
+     \begin{subfigure}[t]{0.49\textwidth}
+         \includegraphics[width=\textwidth]{fig/lig_size.png}
+         \caption{Histogram of ligand sizes}
+         \label{fig:lig_size}
+     \end{subfigure}
+     \hfill
+     \begin{subfigure}[t]{0.49\textwidth}
+         \includegraphics[width=\textwidth]{fig/pro_size.png}
+         \caption{Histogram of protein sizes}
+         \label{fig:pro_size}
+     \end{subfigure}
+
+    \caption{Frequency distribution of ligand and protein sizes in terms of number of atoms}
+    \label{fig:hist_sizes}
+\end{figure}
+
+\subsection{Proportion of classes}
+We were provided with the PDB files of 3000 proteins and 3000 ligands, which contained information about the 3-dimensional structures of 3000 positive protein-ligand complexes. Assuming that one protein only docks with one ligand in the data set, this meant that out of the 9 million possible protein-ligand combinations, only 3000 were positive and the remaining 8997000 would be negative. This leads to an highly imbalanced data set, which we decided to correct to an equal proportion of positive and negative samples by undersampling the negative samples. Hence, only 3000 negative samples were chosen at random to be used in our training data set. As a result, we ended up with a relatively small data set of 6000 samples. Another possible solution to the problem of a small data set would be to upsample the positive samples by generating synthetic data through slight perturbation of their features.
+
+\section{Data Preprocessing}
+In order to standardise the number of attributes for each protein-ligand pair, we devised an algorithm that would select an arbitrary number of protein atoms and ligand atoms for each protein-ligand pair. Our algorithm assumes that the protein atoms closest to the ligand are the most relevant to determining whether a protein-ligand pair binds or not. For positive protein-ligand pairs, we will essentially be selecting atoms that are in the ligand binding site of the protein. We decided to select 8 ligand atoms in order to avoid truncating majority of our ligands after examining the distribution of ligand sizes (Figure \ref{fig:lig_size}). We created 5 data sets selecting 8, 16, 40, 80 and 300 protein atoms together with 8 ligand atoms in order to test which would perform better in our prediction task. We initially thought that 300 protein atoms would give the best performance as it preserves the most information about the protein binding site. However, after evaluating all the data sets, we selected the data set with 16 protein atoms and 8 ligand atoms as it gave the best averaged performance over several multilayer perceptron (MLP) and convolutional neural network (CNN) models.
+
+We describe our algorithm in greater detail with reference to how the test data set was generated. For each of the 824 ligands provided, we first calculated the centroid of each ligand based on the (x, y, z) coordinates of all ligand atoms. If the ligand has more than 8 atoms, the closest 8 atoms to the centroid are selected and are ordered with the closest on top of the ligand matrix. If the ligand has less than 8 atoms, the shortfall in attributes are padded with zeros at the bottom of the ligand matrix (Figure \ref{fig:matrix}). For each of the 824 possible binding protein candidates, we select the 16 protein atoms that are closest to the ligand centroid with the closest atoms ordered at the bottom of the protein matrix. Hence for each possible protein-ligand pair, we get a 24 by 4 matrix composed of the protein and ligand matrix as illustrated in Figure \ref{fig:matrix}. Iterating through all 824 proteins and 824 ligands, we get 678,976 possible protein-ligand pairs in our test data set.
+
+For the data set provided, we also had to convert the categorical variable, atom type, to a numerical value. We decided to assign a value of 1 to hydrophobic atoms and -1 to polar atoms. We used -1 instead of 0 in order to distinguish it from the 0 values we pad if there is a shortfall in ligand atoms.
+
+\begin{figure}[htb]
+    \centering
+    \includegraphics[width=0.15\textwidth]{fig/matrix.png}
+    \caption{Illustration of processed data matrix for protein-ligand pair.}
+    \label{fig:matrix}
+\end{figure}
+
+\section{Experimental Study}
+\subsection{Model Selection}
+After experimenting with several neural network models including MLPs, CNNs and Long-Short Term Memory (LSTM) \cite{hochreiter1997long} networks, and several ensemble machine learning methods, we decided on using the CNN for our prediction task. A test data set was first created from a 20\% split off the training data set. We evaluated the models based on their categorical accuracy for the test data set, and also observed their ability to minimise the loss function. We decided to use the categorical cross entropy loss function, also known as the negative log likelihood, together with two output nodes followed by a final softmax activation function. This was used instead of just one output node followed by a sigmoid activation function, as it offers slightly better accuracy. Out of all the models, the CNN model achieved the best prediction accuracy, and also achieved good convergence of the loss function.
+
+\subsection{Hyperparameter Tuning}
+After deciding on using the CNN model, we tuned the hyperparameters of our model in an effort to increase the accuracy of our validation data set while ensuring good convergence of the loss function. We first experimented with the depth and breath of the network. Efforts to go deeper beyond 14 layers did not yield any significant improvements. We also tried a shallow but wide neural network, but the results were not as good. Our final model consists of 14 layers that taper down in width. The number of neurons in the hidden layers are as follows: {200, 200, 96, 96, 48, 48, 24, 24, 16, 16, 8, 8, 8}. Each hidden layer has a weight matrix with a dimension defined by the input size and the number of neurons in that layer. We end off with two nodes in our output layer as we are dealing with a binary classification problem. We use the rectified linear unit (ReLU) activation function after every hidden layer to provide non-linear transformation to our inputs. The ReLU activation function is chosen over the sigmoid or tanh activation function in order to avoid the problem of vanishing gradients during backpropagation. Batch normalization \cite{ioffe2015batch} was performed in order to normalise the distribution of inputs for these hidden layers. Batch normalization helped improve the convergence of both the training and validation loss curves. It also served as a regularizer, preventing our model from overfitting to the training data set. After observing a divergence between the loss curves of the training and validation data set, we decided to introduce dropout regularization in order to prevent our model from overfitting on the training data set. We found that the validation loss converged better with no decrease in prediction accuracy when dropout was applied to the first hidden layer in our model.
+
+\section{Train and Test Procedure}
+\subsection{Train Procedure}
+We trained our CNN model using the ‘Adam’ optimiser \cite{kingma2014adam} as it showed the best performance in converging the loss function and did not require much parameter tuning. Efforts to tune the parameters of the stochastic gradient descent (SGD) optimiser did not produce as good of a convergence. We decided on using a batch size of 150 as it resulted in a good convergence of the loss function after trying out a series of sizes from 20 to 300. We decided to train our model over 150 epochs as the categorical accuracy of the validation data set had plateaued by then (Figure \ref{fig:train_acc}), and the validation loss could no longer converge further (Figure \ref{fig:train_loss}). We obtained a final accuracy of 0.9385 over the training data set, and 0.8933 over the testing data set.
+
+For our final prediction model, we decided to use the entire training data set of 6000 samples, instead of splitting part of it to form the validation data set. We wanted to maximise the number of samples used to train the model, as it was not big to begin with. Figure \ref{fig:final_curves} shows the loss and accuracy curves of our final prediction model.
+
+\begin{figure}[htb]
+     \centering
+     \begin{subfigure}[t]{0.49\textwidth}
+         \includegraphics[width=\textwidth]{fig/train_loss.png}
+         \caption{Loss Curves}
+         \label{fig:train_loss}
+     \end{subfigure}
+     \hfill
+     \begin{subfigure}[t]{0.49\textwidth}
+         \includegraphics[width=\textwidth]{fig/train_acc.png}
+         \caption{Accuracy Curves}
+         \label{fig:train_acc}
+     \end{subfigure}
+
+    \caption{Learning and validation curves after model optimization}
+    \label{fig:train_curves}
+\end{figure}
+
+\begin{figure}[htb]
+     \centering
+     \begin{subfigure}[t]{0.49\textwidth}
+         \includegraphics[width=\textwidth]{fig/train_loss.png}
+         \caption{Loss Curve}
+         \label{fig:final_loss}
+     \end{subfigure}
+     \hfill
+     \begin{subfigure}[t]{0.49\textwidth}
+         \includegraphics[width=\textwidth]{fig/train_acc.png}
+         \caption{Accuracy Curve}
+         \label{fig:final_acc}
+     \end{subfigure}
+
+    \caption{Training curves for final prediction model}
+    \label{fig:final_curves}
+\end{figure}
+
+\subsection{Test Procedure}
+We ran our trained CNN model on the 678,976 possible protein-ligand pairs in our test data set to predict the probabilities of each pair binding. For each protein, we obtained its probability of binding with each of the 824 possible ligands. After ranking the ligands based on their probabilities of binding with the protein, we selected the top 10 ligands and presented them as our suggested binding candidates for each protein. An accurate prediction in this case will occur when the correct ligand is present in one of the 10 suggested ligands.
+
+\section{Discussion}
+\subsection{Multilayer Perceptron}
+In this section we seek to explain our intuition behind using the MLP model. The MLP is composed of an input layer with a number of nodes equal to the number of attributes of the data, followed by a variable number of hidden layers and an output layer. The nodes in between the layers are all fully connected, hence all the nodes have an equal chance of contributing to the decision. The MLP will try to learn a representation of our training data in the feature space that will enable it to discern between our two prediction classes. In contrast, not all the attributes that are fed into CNNs are treated equally. The application of convolutional filters results in pixels near the edge of the image contributing less to the prediction than pixels near the center. When we arrange our protein-ligand data as a 2D matrix and feed it into a CNN, the edges of the data do not contribute equally to the decision. This will result in a loss in prediction accuracy as the edges of our protein-ligand data matrix also contain important information. 
+
+\subsection{Convolutional Neural Network}
+CNNs were optimized to process 2D image data and perform very well in image classification tasks. \cite{krizhevsky2012imagenet,simonyan2014very,szegedy2015going} They comprise of convolutional filters that are able to extract significant image features and are able to conserve spatial relationships between pixels in an image. However, when we fed the protein-ligand data matrix into a simple CNN consisting of two convolutional layers with 3 by 3 filters and three fully connected layers, we achieved a respectable accuracy of 0.9385 for the training data set and 0.8824 for the validation data set. We also adapted the VGGNet model developed by Simonyan and Zisserman \cite{simonyan2014very} to test for its viability in predicting protein-ligand binding pairs. Although VGGNet was much deeper, consisting of 16 convolutional layers with small 3 by 3 filters, it achieved a similar validation accuracy as to our simple CNN model.
+
+\subsection{Ensemble Machine Learning Methods}
+We also experimented with using several state-of-the-art ensemble machine learning methods such as the random forest \cite{breiman2001random}, XGboost \cite{chen2016xgboost} and LightGBM \cite{ke2017lightgbm} algorithms for our protein-ligand binding prediction task. The random forest algorithm trains a collection of decision trees and makes a prediction by averaging the output of each tree. We obtained a training accuracy of 0.946 and validation accuracy of 0.753 using the random forest algorithm. The XGBoost algorithm  uses presorted and histogram-based algorithm for computing the best split. However, it achieved poor accuracy for both the training data set: 0.525 and validation data set: 0.431. LightGBM algorithm on the other hand uses a novel technique of Gradient-based One-Side Sampling (GOSS) to filter out the data instances for finding a split value. It achieved a good training accuracy of 1.000, but  its validation accuracy of 0.470 was poor.
+
+Across the ensemble learning methods, we faced the problem of the models overfitting to the training data, even after the parameters were optimized to reduce overfitting. The validation accuracy was low as compared to our neural network models.
+
+\section{Conclusion}
+Deep learning has been shown to be a useful approach when dealing with high-dimensional data sets. In our project, the CNN model has proven to be a suitable Deep Learning algorithm for accurate prediction of protein-ligand binding. 
+
+% Takashi I., Naoto K., Prediction of Protein-Ligand Binding Sites Using 3D Convolutional Neural Networks, IPSJ SIG Technical Report, 2016.
+
+% section 4, 5.1, 6
+
+\clearpage
+
+\clearpage
+\bibliography{ref.bib}
+\bibliographystyle{unsrt}
+
+\end{document}
